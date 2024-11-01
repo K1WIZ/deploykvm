@@ -20,7 +20,7 @@
 #   - gw: Network gateway e.g. 10.9.9.1
 #
 # Example Usage:
-#   ansible-playbook deploykvm.yaml --extra-vars "vm_count=3 network_bridge=br10 vcpu=4 memory=4096 base_ip=10.9.9.210 mask=24 gw=10.9.9.1"
+#   ansible-playbook deploykvm.yaml --extra-vars "basename=lab vm_count=3 network_bridge=br10 vcpu=4 memory=4096 base_ip=10.9.9.210 mask=24 gw=10.9.9.1"
 #
 # Author: John Rogers
 # Date: 08-10-2024
