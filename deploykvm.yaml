@@ -16,6 +16,7 @@
 #   - memory: Amount of memory (in MB) to allocate to each VM
 #   - base_ip: Starting IP address to assign to the cloned VMs
 #   - mask: Network mask in CIDR notation (e.g., 24 for 255.255.255.0)
+#   - gw: Network gateway e.g. 10.9.9.1
 #
 # Example Usage:
 #   ansible-playbook deploykvm.yaml --extra-vars "vm_count=3 network_bridge=br10 vcpu=4 memory=4096 base_ip=10.9.9.210 mask=24 gw=10.9.9.1"
