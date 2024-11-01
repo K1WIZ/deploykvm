@@ -10,6 +10,7 @@
 #       new template VMs you may wish to clone from.
 #
 # Required Extra Variables:
+#   - basename: Base name of coned hosts (appended by serial number)
 #   - vm_count: Number of VMs to clone from the template
 #   - network_bridge: Network bridge interface for the VM network
 #   - vcpu: Number of virtual CPUs to allocate to each VM
@@ -30,7 +31,6 @@
   gather_facts: no
   vars:
     template_vm: "ubuntu20.04-30G"        # Name of the template VM
-    clone_prefix: "lab-"                  # Prefix for clone names
     netplan_template: "netplan_template.yaml"
     ansible_ssh_common_args: '-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null'
 
@@ -47,7 +47,7 @@
     - name: Generate custom netplan file for each VM
       template:
         src: "{{ netplan_template }}"
-        dest: "/tmp/netplan-{{ clone_prefix }}{{ '%02d' | format(vm_id + 1) }}.yaml"
+        dest: "/tmp/netplan-{{ basename }}{{ '%02d' | format(vm_id + 1) }}.yaml"
       loop: "{{ range(1, (vm_count | int) + 1) | list }}"
       loop_control:
         index_var: vm_id
@@ -60,7 +60,7 @@
       command: >
         virt-clone
         --original {{ template_vm }}
-        --name {{ clone_prefix }}{{ '%02d' | format(item) }}
+        --name {{ basename }}{{ '%02d' | format(item) }}
         --auto-clone
       loop: "{{ range(1, (vm_count | int) + 1) | list }}"
       loop_control:
@@ -70,42 +70,42 @@
       block:
         - name: Update maximum vCPU for each cloned VM
           command: >
-            virsh setvcpus {{ clone_prefix }}{{ '%02d' | format(vm_id + 1) }} {{ vcpu | int }} --maximum --config
+            virsh setvcpus {{ basename }}{{ '%02d' | format(vm_id + 1) }} {{ vcpu | int }} --maximum --config
           loop: "{{ range(1, (vm_count | int) + 1) | list }}"
           loop_control:
             index_var: vm_id
 
         - name: Update memory for each cloned VM
           command: >
-            virsh setmaxmem {{ clone_prefix }}{{ '%02d' | format(vm_id + 1) }} {{ memory | int * 1024 }} --config
+            virsh setmaxmem {{ basename }}{{ '%02d' | format(vm_id + 1) }} {{ memory | int * 1024 }} --config
           loop: "{{ range(1, (vm_count | int) + 1) | list }}"
           loop_control:
             index_var: vm_id
 
         - name: Set memory for each cloned VM
           command: >
-            virsh setmem {{ clone_prefix }}{{ '%02d' | format(vm_id + 1) }} {{ memory | int * 1024 }} --config
+            virsh setmem {{ basename }}{{ '%02d' | format(vm_id + 1) }} {{ memory | int * 1024 }} --config
           loop: "{{ range(1, (vm_count | int) + 1) | list }}"
           loop_control:
             index_var: vm_id
 
         - name: Set current vCPU for each cloned VM
           command: >
-            virsh setvcpus {{ clone_prefix }}{{ '%02d' | format(vm_id + 1) }} {{ vcpu | int }} --config
+            virsh setvcpus {{ basename }}{{ '%02d' | format(vm_id + 1) }} {{ vcpu | int }} --config
           loop: "{{ range(1, (vm_count | int) + 1) | list }}"
           loop_control:
             index_var: vm_id
 
     - name: Detach existing network interface for each cloned VM
       command: >
-        virsh detach-interface {{ clone_prefix }}{{ '%02d' | format(vm_id + 1) }} network --config
+        virsh detach-interface {{ basename }}{{ '%02d' | format(vm_id + 1) }} network --config
       loop: "{{ range(1, (vm_count | int) + 1) | list }}"
       loop_control:
         index_var: vm_id
 
     - name: Attach new network bridge to each cloned VM
       command: >
-        virsh attach-interface {{ clone_prefix }}{{ '%02d' | format(vm_id + 1) }} bridge {{ network_bridge }} --model virtio --config
+        virsh attach-interface {{ basename }}{{ '%02d' | format(vm_id + 1) }} bridge {{ network_bridge }} --model virtio --config
       loop: "{{ range(1, (vm_count | int) + 1) | list }}"
       loop_control:
         index_var: vm_id
@@ -113,7 +113,7 @@
     - name: Generate custom netplan file for each VM
       template:
         src: "{{ netplan_template }}"
-        dest: "/tmp/netplan-{{ clone_prefix }}{{ '%02d' | format(vm_id + 1) }}.yaml"
+        dest: "/tmp/netplan-{{ basename }}{{ '%02d' | format(vm_id + 1) }}.yaml"
       loop: "{{ range(1, (vm_count | int) + 1) | list }}"
       loop_control:
         index_var: vm_id
@@ -123,7 +123,7 @@
 
     - name: Remove any existing netplan files in /etc/netplan
       command: >
-        virt-customize -a /var/lib/libvirt/images/{{ clone_prefix }}{{ '%02d' | format(vm_id + 1) }}.qcow2
+        virt-customize -a /var/lib/libvirt/images/{{ basename }}{{ '%02d' | format(vm_id + 1) }}.qcow2
         --run-command 'rm -f /etc/netplan/*.yaml'
       loop: "{{ range(1, (vm_count | int) + 1) | list }}"
       loop_control:
@@ -131,15 +131,15 @@
 
     - name: Upload custom netplan configuration to each cloned VM
       command: >
-        virt-customize -a /var/lib/libvirt/images/{{ clone_prefix }}{{ '%02d' | format(vm_id + 1) }}.qcow2
-        --upload /tmp/netplan-{{ clone_prefix }}{{ '%02d' | format(vm_id + 1) }}.yaml:/etc/netplan/01-netcfg.yaml
+        virt-customize -a /var/lib/libvirt/images/{{ basename }}{{ '%02d' | format(vm_id + 1) }}.qcow2
+        --upload /tmp/netplan-{{ basename }}{{ '%02d' | format(vm_id + 1) }}.yaml:/etc/netplan/01-netcfg.yaml
       loop: "{{ range(1, (vm_count | int) + 1) | list }}"
       loop_control:
         index_var: vm_id
 
     - name: Generate SSH host keys on each VM
       command: >
-        virt-customize -a /var/lib/libvirt/images/{{ clone_prefix }}{{ '%02d' | format(vm_id + 1) }}.qcow2
+        virt-customize -a /var/lib/libvirt/images/{{ basename }}{{ '%02d' | format(vm_id + 1) }}.qcow2
         --run-command 'ssh-keygen -A'
       loop: "{{ range(1, (vm_count | int) + 1) | list }}"
       loop_control:
@@ -147,7 +147,7 @@
 
     - name: Start each cloned VM
       command: >
-        virsh start {{ clone_prefix }}{{ '%02d' | format(vm_id + 1) }}
+        virsh start {{ basename }}{{ '%02d' | format(vm_id + 1) }}
       loop: "{{ range(1, (vm_count | int) + 1) | list }}"
       loop_control:
         index_var: vm_id
@@ -170,8 +170,8 @@
 
     - name: Set hostname for each cloned VM
       ansible.builtin.shell: |
-        echo "{{ clone_prefix }}{{ '%02d' | format(vm_id + 1) }}" > /etc/hostname
-        hostnamectl set-hostname {{ clone_prefix }}{{ '%02d' | format(vm_id + 1) }}
+        echo "{{ basename }}{{ '%02d' | format(vm_id + 1) }}" > /etc/hostname
+        hostnamectl set-hostname {{ basename }}{{ '%02d' | format(vm_id + 1) }}
       delegate_to: "{{ base_ip.rsplit('.', 1)[0] }}.{{ base_ip.rsplit('.', 1)[1] | int + vm_id }}"
       loop: "{{ range(1, (vm_count | int) + 1) | list }}"
       loop_control:
@@ -180,7 +180,7 @@
     - name: Update /etc/hosts with hostname and loopback for each cloned VM
       ansible.builtin.shell: |
         echo "127.0.0.1 localhost" > /etc/hosts
-        echo "{{ base_ip.rsplit('.', 1)[0] }}.{{ base_ip.rsplit('.', 1)[1] | int + vm_id }} {{ clone_prefix }}{{ '%02d' | format(vm_id + 1) }}" >> /etc/hosts
+        echo "{{ base_ip.rsplit('.', 1)[0] }}.{{ base_ip.rsplit('.', 1)[1] | int + vm_id }} {{ basename }}{{ '%02d' | format(vm_id + 1) }}" >> /etc/hosts
       delegate_to: "{{ base_ip.rsplit('.', 1)[0] }}.{{ base_ip.rsplit('.', 1)[1] | int + vm_id }}"
       loop: "{{ range(1, (vm_count | int) + 1) | list }}"
       loop_control:
@@ -196,7 +196,7 @@
 
     - name: Clean up temporary netplan files
       file:
-        path: "/tmp/netplan-{{ clone_prefix }}{{ '%02d' | format(vm_id + 1) }}.yaml"
+        path: "/tmp/netplan-{{ basename }}{{ '%02d' | format(vm_id + 1) }}.yaml"
         state: absent
       loop: "{{ range(1, (vm_count | int) + 1) | list }}"
       loop_control:
