@@ -4,10 +4,11 @@
 # Purpose: Clones an Ubuntu template VM, sets custom configurations (vCPU, memory,
 #          network, hostname), and performs unattended configuration for KVM guests.
 #
-# NOTE: This playbook expects to be run on a KVM host and for the public SSH key
+# NOTE: This playbook expects to be run on a KVM host and for the hosts public SSH key
 #       to be already deployed to the template VMs authorized_keys file to 
 #       avoid any authentication issues on run.  Keep this in mind when building 
-#       new template VMs you may wish to clone from.
+#       new template VMs you may wish to clone from.  You will want to add such
+#       key to any new templates you will clone from.
 #
 # Required Extra Variables:
 #   - basename: Base name of coned hosts (appended by serial number)
