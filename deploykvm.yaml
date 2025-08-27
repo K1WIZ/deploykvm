@@ -1,60 +1,42 @@
 ---
 # ==============================================================================
 # Playbook: deploykvm.yaml
-# Purpose: Clones an Ubuntu template VM, sets custom configurations (vCPU, memory,
-#          network, hostname), and performs unattended configuration for KVM guests.
+# Purpose: Clone an Ubuntu template VM and configure vCPU, memory, netplan,
+#          hostname, /etc/hosts, and reboot — all from the KVM host.
 #
-# NOTE: This playbook expects to be run on a KVM host and for the hosts public SSH key
-#       to be already deployed to the template VMs authorized_keys file to 
-#       avoid any authentication issues on run.  Keep this in mind when building 
-#       new template VMs you may wish to clone from.  You will want to add such
-#       key to any new templates you will clone from.
-#
-# Required Extra Variables:
-#   - basename: Base name of coned hosts (appended by serial number)
-#   - vm_count: Number of VMs to clone from the template
-#   - network_bridge: Network bridge interface for the VM network
-#   - vcpu: Number of virtual CPUs to allocate to each VM
-#   - memory: Amount of memory (in MB) to allocate to each VM
-#   - base_ip: Starting IP address to assign to the cloned VMs
-#   - mask: Network mask in CIDR notation (e.g., 24 for 255.255.255.0)
-#   - gw: Network gateway e.g. 10.9.9.1
-#
-# Example Usage:
-#   ansible-playbook deploykvm.yaml --extra-vars "basename=lab vm_count=3 network_bridge=br10 vcpu=4 memory=4096 base_ip=10.9.9.210 mask=24 gw=10.9.9.1"
-#
-# Author: John Rogers
-# Date: 08-10-2024
+# Usage example:
+#   ansible-playbook -i localhost, deploykvm.yaml \
+#     --extra-vars "basename=lab vm_count=3 network_bridge=br10 vcpu=4 memory=4096 base_ip=10.9.9.210 mask=24 gw=10.9.9.1"
 # ==============================================================================
 
 - name: Clone Ubuntu template VM
   hosts: localhost
   gather_facts: no
   vars:
-    template_vm: "ubuntu20.04-30G"        # Name of the template VM
+    template_vm: "ubuntu20.04-30G"
     netplan_template: "netplan_template.yaml"
-    ansible_ssh_common_args: '-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null'
+
+    # Applies to localhost; delegated tasks set their own SSH args explicitly.
+    ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
 
   tasks:
-
     - name: Ensure base_ip, mask, and gw are defined
       assert:
         that:
           - base_ip is defined and base_ip | length > 0
-          - mask is defined and mask | int > 0
-          - gw is defined and gw | length > 0
-        fail_msg: "base_ip, mask, and/or gw (gateway) are not defined. Please provide them as extra-vars."
+          - mask is defined and (mask | int) > 0
+          - gw   is defined and gw   | length > 0
+        fail_msg: "base_ip, mask, and/or gw are not defined. Pass them via --extra-vars."
 
     - name: Generate custom netplan file for each VM
       template:
         src: "{{ netplan_template }}"
         dest: "/tmp/netplan-{{ basename }}{{ '%02d' | format(vm_id + 1) }}.yaml"
       loop: "{{ range(1, (vm_count | int) + 1) | list }}"
-      loop_control:
-        index_var: vm_id
+      loop_control: { index_var: vm_id }
       vars:
-        vm_ip: "{{ base_ip.rsplit('.', 1)[0] }}.{{ base_ip.rsplit('.', 1)[1] | int + vm_id }}"
-        mask: "{{ mask | int }}"
+        vm_ip:  "{{ base_ip.rsplit('.', 1)[0] }}.{{ base_ip.rsplit('.', 1)[1] | int + vm_id }}"
+        mask:   "{{ mask | int }}"
         gateway: "{{ gw }}"
 
     - name: Clone the template VM
@@ -64,8 +46,7 @@
         --name {{ basename }}{{ '%02d' | format(item) }}
         --auto-clone
       loop: "{{ range(1, (vm_count | int) + 1) | list }}"
-      loop_control:
-        index_var: vm_id
+      loop_control: { index_var: vm_id }
 
     - name: Set memory and CPU for each cloned VM
       block:
@@ -73,92 +54,81 @@
           command: >
             virsh setvcpus {{ basename }}{{ '%02d' | format(vm_id + 1) }} {{ vcpu | int }} --maximum --config
           loop: "{{ range(1, (vm_count | int) + 1) | list }}"
-          loop_control:
-            index_var: vm_id
+          loop_control: { index_var: vm_id }
 
-        - name: Update memory for each cloned VM
+        - name: Update memory ceiling for each cloned VM
           command: >
             virsh setmaxmem {{ basename }}{{ '%02d' | format(vm_id + 1) }} {{ memory | int * 1024 }} --config
           loop: "{{ range(1, (vm_count | int) + 1) | list }}"
-          loop_control:
-            index_var: vm_id
+          loop_control: { index_var: vm_id }
 
-        - name: Set memory for each cloned VM
+        - name: Set current memory for each cloned VM
           command: >
             virsh setmem {{ basename }}{{ '%02d' | format(vm_id + 1) }} {{ memory | int * 1024 }} --config
           loop: "{{ range(1, (vm_count | int) + 1) | list }}"
-          loop_control:
-            index_var: vm_id
+          loop_control: { index_var: vm_id }
 
         - name: Set current vCPU for each cloned VM
           command: >
             virsh setvcpus {{ basename }}{{ '%02d' | format(vm_id + 1) }} {{ vcpu | int }} --config
           loop: "{{ range(1, (vm_count | int) + 1) | list }}"
-          loop_control:
-            index_var: vm_id
+          loop_control: { index_var: vm_id }
 
     - name: Detach existing network interface for each cloned VM
       command: >
         virsh detach-interface {{ basename }}{{ '%02d' | format(vm_id + 1) }} network --config
       loop: "{{ range(1, (vm_count | int) + 1) | list }}"
-      loop_control:
-        index_var: vm_id
+      loop_control: { index_var: vm_id }
 
     - name: Attach new network bridge to each cloned VM
       command: >
         virsh attach-interface {{ basename }}{{ '%02d' | format(vm_id + 1) }} bridge {{ network_bridge }} --model virtio --config
       loop: "{{ range(1, (vm_count | int) + 1) | list }}"
-      loop_control:
-        index_var: vm_id
+      loop_control: { index_var: vm_id }
 
-    - name: Generate custom netplan file for each VM
+    - name: Generate custom netplan file for each VM (re-render)
       template:
         src: "{{ netplan_template }}"
         dest: "/tmp/netplan-{{ basename }}{{ '%02d' | format(vm_id + 1) }}.yaml"
       loop: "{{ range(1, (vm_count | int) + 1) | list }}"
-      loop_control:
-        index_var: vm_id
+      loop_control: { index_var: vm_id }
       vars:
-        vm_ip: "{{ base_ip.rsplit('.', 1)[0] }}.{{ base_ip.rsplit('.', 1)[1] | int + vm_id }}"
-        mask: "{{ mask | int }}"  # Use the mask variable for netplan template
+        vm_ip:  "{{ base_ip.rsplit('.', 1)[0] }}.{{ base_ip.rsplit('.', 1)[1] | int + vm_id }}"
+        mask:   "{{ mask | int }}"
+        gateway: "{{ gw }}"
 
     - name: Remove any existing netplan files in /etc/netplan
       command: >
         virt-customize -a /var/lib/libvirt/images/{{ basename }}{{ '%02d' | format(vm_id + 1) }}.qcow2
         --run-command 'rm -f /etc/netplan/*.yaml'
       loop: "{{ range(1, (vm_count | int) + 1) | list }}"
-      loop_control:
-        index_var: vm_id
+      loop_control: { index_var: vm_id }
 
     - name: Upload custom netplan configuration to each cloned VM
       command: >
         virt-customize -a /var/lib/libvirt/images/{{ basename }}{{ '%02d' | format(vm_id + 1) }}.qcow2
         --upload /tmp/netplan-{{ basename }}{{ '%02d' | format(vm_id + 1) }}.yaml:/etc/netplan/01-netcfg.yaml
       loop: "{{ range(1, (vm_count | int) + 1) | list }}"
-      loop_control:
-        index_var: vm_id
+      loop_control: { index_var: vm_id }
 
     - name: Generate SSH host keys on each VM
       command: >
         virt-customize -a /var/lib/libvirt/images/{{ basename }}{{ '%02d' | format(vm_id + 1) }}.qcow2
         --run-command 'ssh-keygen -A'
       loop: "{{ range(1, (vm_count | int) + 1) | list }}"
-      loop_control:
-        index_var: vm_id
+      loop_control: { index_var: vm_id }
 
     - name: Start each cloned VM
       command: >
         virsh start {{ basename }}{{ '%02d' | format(vm_id + 1) }}
       loop: "{{ range(1, (vm_count | int) + 1) | list }}"
-      loop_control:
-        index_var: vm_id
+      loop_control: { index_var: vm_id }
 
     - name: Pause for 5 seconds before waiting for SSH
       pause:
         seconds: 5
       loop: "{{ range(1, (vm_count | int) + 1) | list }}"
-      loop_control:
-        index_var: vm_id
+      loop_control: { index_var: vm_id }
 
     - name: Wait for SSH to become available on each cloned VM
       wait_for:
@@ -166,39 +136,84 @@
         port: 22
         timeout: 300
       loop: "{{ range(1, (vm_count | int) + 1) | list }}"
-      loop_control:
-        index_var: vm_id
+      loop_control: { index_var: vm_id }
 
-    - name: Set hostname for each cloned VM
-      ansible.builtin.shell: |
-        echo "{{ basename }}{{ '%02d' | format(vm_id + 1) }}" > /etc/hostname
+    # ---- Delegated configuration on the guests (explicit SSH context) ----
+
+    - name: Probe delegated host (delegated)
+      delegate_to: "{{ base_ip.rsplit('.', 1)[0] }}.{{ base_ip.rsplit('.', 1)[1] | int + vm_id }}"
+      vars:
+        ansible_connection: ssh
+        ansible_user: root
+        ansible_python_interpreter: /usr/bin/python3
+        ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o BatchMode=yes"
+      command: uname -a
+      register: probe_out
+      changed_when: false
+      loop: "{{ range(1, (vm_count | int) + 1) | list }}"
+      loop_control: { index_var: vm_id }
+
+    - name: Set hostname for each cloned VM (delegated)
+      delegate_to: "{{ base_ip.rsplit('.', 1)[0] }}.{{ base_ip.rsplit('.', 1)[1] | int + vm_id }}"
+      vars:
+        ansible_connection: ssh
+        ansible_user: root
+        ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o BatchMode=yes"
+      command: >
         hostnamectl set-hostname {{ basename }}{{ '%02d' | format(vm_id + 1) }}
-      delegate_to: "{{ base_ip.rsplit('.', 1)[0] }}.{{ base_ip.rsplit('.', 1)[1] | int + vm_id }}"
       loop: "{{ range(1, (vm_count | int) + 1) | list }}"
-      loop_control:
-        index_var: vm_id
+      loop_control: { index_var: vm_id }
 
-    - name: Update /etc/hosts with hostname and loopback for each cloned VM
-      ansible.builtin.shell: |
-        echo "127.0.0.1 localhost" > /etc/hosts
-        echo "{{ base_ip.rsplit('.', 1)[0] }}.{{ base_ip.rsplit('.', 1)[1] | int + vm_id }} {{ basename }}{{ '%02d' | format(vm_id + 1) }}" >> /etc/hosts
+    - name: Ensure /etc/hostname contains the hostname (delegated)
       delegate_to: "{{ base_ip.rsplit('.', 1)[0] }}.{{ base_ip.rsplit('.', 1)[1] | int + vm_id }}"
+      vars:
+        ansible_connection: ssh
+        ansible_user: root
+        ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o BatchMode=yes"
+      copy:
+        dest: /etc/hostname
+        content: "{{ basename }}{{ '%02d' | format(vm_id + 1) }}\n"
+        owner: root
+        group: root
+        mode: "0644"
       loop: "{{ range(1, (vm_count | int) + 1) | list }}"
-      loop_control:
-        index_var: vm_id
+      loop_control: { index_var: vm_id }
 
-    - name: Reboot each cloned VM
+    - name: Ensure /etc/hosts contains localhost and this host (delegated)
+      delegate_to: "{{ base_ip.rsplit('.', 1)[0] }}.{{ base_ip.rsplit('.', 1)[1] | int + vm_id }}"
+      vars:
+        ansible_connection: ssh
+        ansible_user: root
+        ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o BatchMode=yes"
+      blockinfile:
+        path: /etc/hosts
+        block: |
+          127.0.0.1 localhost
+          {{ base_ip.rsplit('.', 1)[0] }}.{{ base_ip.rsplit('.', 1)[1] | int + vm_id }} {{ basename }}{{ '%02d' | format(vm_id + 1) }}
+        create: yes
+        owner: root
+        group: root
+        mode: "0644"
+      loop: "{{ range(1, (vm_count | int) + 1) | list }}"
+      loop_control: { index_var: vm_id }
+
+    - name: Reboot each cloned VM (delegated)
+      delegate_to: "{{ base_ip.rsplit('.', 1)[0] }}.{{ base_ip.rsplit('.', 1)[1] | int + vm_id }}"
+      vars:
+        ansible_connection: ssh
+        ansible_user: root
+        ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o BatchMode=yes"
       reboot:
         reboot_timeout: 300
-      delegate_to: "{{ base_ip.rsplit('.', 1)[0] }}.{{ base_ip.rsplit('.', 1)[1] | int + vm_id }}"
       loop: "{{ range(1, (vm_count | int) + 1) | list }}"
-      loop_control:
-        index_var: vm_id
+      loop_control: { index_var: vm_id }
+
+    # ---- Cleanup ----
 
     - name: Clean up temporary netplan files
       file:
         path: "/tmp/netplan-{{ basename }}{{ '%02d' | format(vm_id + 1) }}.yaml"
         state: absent
       loop: "{{ range(1, (vm_count | int) + 1) | list }}"
-      loop_control:
-        index_var: vm_id
+      loop_control: { index_var: vm_id }
+
